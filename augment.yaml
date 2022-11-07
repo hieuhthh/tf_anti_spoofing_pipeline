@@ -1,0 +1,19 @@
+flip_left_right_prob: 0.5
+flip_up_down_prob: 0
+
+rotate_prob: 0.5 
+rotate: 10 # degree
+
+cutout_prob: 0.2
+cutout_pad_factor: 0.2
+
+color_prob: 0.6
+sature: [0.9, 1.1]
+contrast: [0.9, 1.1]
+brightness: 0.1
+hue: ~
+
+solarize_prob: 0.2
+solarize_threshold: 0.5
+
+equalize_prob: 0.2

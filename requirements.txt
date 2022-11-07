@@ -1,0 +1,8 @@
+gdown
+matplotlib
+PyYAML
+tensorflow_addons
+pandas
+sklearn
+opencv-python
+git+https://github.com/leondgarse/keras_cv_attention_models
