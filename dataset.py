@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import KFold, StratifiedKFold
 import tensorflow as tf
+import cv2
 
 from augment import *
 
@@ -28,26 +29,17 @@ def get_data_from_phrase(route, phrase=None):
         Y_int = Y_int + len(temp) * [all_class.index(cl)]
     return X_path, Y_int, all_class
 
-def auto_split_data(route, fold, valid_fold=None, test_fold=None, stratified=False, seed=42):
-    """
-    input:
-        route to the directory that its subfolder are classes
-        fold: how many folds
-    output:
-        X, Y, class corresponding
-    """
-    X_path, Y_int, all_class = get_data_from_phrase(route)
-
-    df = pd.DataFrame({'image':X_path, 'label':Y_int})
+def auto_split_df(df, x_name='image', y_name='label', valid_fold=None, test_fold=None, stratified=False, seed=42):
     df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
+    all_class = sorted(list(df[y_name].unique()))
 
     if stratified:
         skf = StratifiedKFold(n_splits=fold, random_state=seed, shuffle=True)
-        for idx, (train_index, test_index) in enumerate(skf.split(df.image, df.label)):
+        for idx, (train_index, test_index) in enumerate(skf.split(df[x_name], df[y_name])):
             df.loc[test_index, 'fold'] = idx
     else:
         kf = KFold(n_splits=fold, random_state=seed, shuffle=True)
-        for idx, (train_index, test_index) in enumerate(kf.split(df.image)):
+        for idx, (train_index, test_index) in enumerate(kf.split(df[x_name])):
             df.loc[test_index, 'fold'] = idx
 
     if valid_fold is not None and test_fold is not None:
@@ -57,13 +49,13 @@ def auto_split_data(route, fold, valid_fold=None, test_fold=None, stratified=Fal
         df_valid = df[df['fold']==valid_fold]
         df_test = df[df['fold']==test_fold]
 
-        X_train = df_train['image'].values
-        X_valid = df_valid['image'].values
-        X_test = df_test['image'].values
+        X_train = df_train[x_name].values
+        X_valid = df_valid[x_name].values
+        X_test = df_test[x_name].values
 
-        Y_train = df_train['label'].values
-        Y_valid = df_valid['label'].values
-        Y_test = df_test['label'].values
+        Y_train = df_train[y_name].values
+        Y_valid = df_valid[y_name].values
+        Y_test = df_test[y_name].values
 
         return X_train, Y_train, all_class, X_valid, Y_valid, X_test, Y_test
 
@@ -72,39 +64,34 @@ def auto_split_data(route, fold, valid_fold=None, test_fold=None, stratified=Fal
 
         df_valid = df[df['fold']==valid_fold]
 
-        X_train = df_train['image'].values
-        X_valid = df_valid['image'].values
+        X_train = df_train[x_name].values
+        X_valid = df_valid[x_name].values
 
-        Y_train = df_train['label'].values
-        Y_valid = df_valid['label'].values
+        Y_train = df_train[y_name].values
+        Y_valid = df_valid[y_name].values
 
         return X_train, Y_train, all_class, X_valid, Y_valid
 
     else:
         df_train = df
 
-        X_train = df_train['image'].values
+        X_train = df_train[x_name].values
 
-        Y_train = df_train['label'].values
+        Y_train = df_train[y_name].values
 
         return X_train, Y_train, all_class
 
 def build_decoder(with_labels=True, label_mode='int', all_class=None, target_size=(256, 256), im_size_before_crop=None):
     def decode_img_preprocess(img):
-        if im_size_before_crop is None:
-            img = tf.image.resize(img, target_size)
-        else:
-            img = tf.image.resize(img, (im_size_before_crop, im_size_before_crop))
+        # if im_size_before_crop is None:
+        #     img = tf.image.resize(img, target_size)
+        # else:
+        #     img = tf.image.resize(img, (im_size_before_crop, im_size_before_crop))
         img = tf.cast(img, tf.float32) / 255.0
         return img
 
-    def decode_img(path):
-        """
-        path to image
-        """
-        file_bytes = tf.io.read_file(path)
-        img = tf.io.decode_image(file_bytes, channels=3, expand_animations=False)
-        img = decode_img_preprocess(img)
+    def decode_img(img):
+        # img = decode_img_preprocess(img)
         return img
     
     def decode_label(label):
@@ -124,7 +111,41 @@ def build_decoder(with_labels=True, label_mode='int', all_class=None, target_siz
     
     return decode_with_labels if with_labels else decode_img
 
-def build_dataset(paths, labels=None, bsize=32,
+def build_load_video(im_size, max_frames):
+    def preprocess_img_video(frame):
+        frame = frame[:, :, [2, 1, 0]]
+        frame = cv2.resize(frame, (im_size, im_size)) 
+        return frame
+
+    def load_video(path):
+        path = path.decode()
+        cap = cv2.VideoCapture(path)
+        frames = []
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame = preprocess_img_video(frame)
+                frames.append(frame)
+        finally:
+            cap.release()
+            
+        frames = np.array(frames)
+
+        if len(frames) >= max_frames:
+            frames = frames[:max_frames]
+        else:
+            pad = np.zeros((max_frames-len(frames), im_size, im_size, 3))
+            frames = np.concatenate((frames, pad))
+        
+        frames = np.float32(frames)
+
+        return frames
+
+    return load_video
+
+def build_dataset(paths, labels=None, load_video=None, bsize=32,
                   decode_fn=None, augment=None,
                   repeat=False, shuffle=1024,
                   cache=False, cache_dir=""):
@@ -143,34 +164,43 @@ def build_dataset(paths, labels=None, bsize=32,
     dset = dset.cache(cache_dir) if cache else dset
     dset = dset.repeat() if repeat else dset
     dset = dset.shuffle(shuffle) if shuffle else dset
+
+    if load_video is not None:
+        dset = dset.map(lambda x,y:(tf.numpy_function(load_video, [x], tf.float32),
+                                    y
+                                    ), num_parallel_calls=AUTO)
+
     dset = dset.map(decode_fn, num_parallel_calls=AUTO)
-    # dset = dset.map(augment, num_parallel_calls=AUTO) if augment is not None else dset
     dset = dset.map(lambda x,y:(augment(x),y), num_parallel_calls=AUTO) if augment is not None else dset
     dset = dset.batch(bsize)
     dset = dset.prefetch(AUTO)
     
     return dset
 
-def build_dataset_from_X_Y(X_path, Y_int, all_class, with_labels, label_mode, img_size,
+def build_dataset_from_X_Y(X_path, Y_int, load_video, all_class, with_labels, label_mode, img_size,
                            batch_size, repeat, shuffle, augment, im_size_before_crop=None):
     decoder = build_decoder(with_labels=with_labels, label_mode=label_mode, all_class=all_class, 
                             target_size=img_size, im_size_before_crop=im_size_before_crop)
 
     augment_img = build_augment() if augment else None
 
-    dataset = build_dataset(X_path, Y_int, bsize=batch_size, decode_fn=decoder,
+    dataset = build_dataset(X_path, Y_int, load_video, bsize=batch_size, decode_fn=decoder,
                             repeat=repeat, shuffle=shuffle, augment=augment_img)
 
     return dataset
 
 if __name__ == '__main__':
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]=""
+
     from utils import *
-    from multiprocess_dataset import *
 
     settings = get_settings()
     globals().update(settings)
 
-    route_dataset = path_join(route, 'dataset')
+    route_dataset = '/home/lap14880/hieunmt/antispoofing/tf_anti_spoofing/unzip/train/videos'
+    df = pd.read_csv('/home/lap14880/hieunmt/antispoofing/tf_anti_spoofing/unzip/train/label.csv')
+    df[x_name] = df[x_name].apply(lambda x : path_join(route_dataset, x))
 
     img_size = (im_size, im_size)
     input_shape = (im_size, im_size, 3)
@@ -179,17 +209,20 @@ if __name__ == '__main__':
     if label_mode == 'cate_int':
         use_cate_int = True
 
-    X_train, Y_train, all_class, X_valid, Y_valid = auto_split_data_multiprocessing_faster(route_dataset, valid_ratio, test_ratio, seed)
+    X_train, Y_train, all_class, X_valid, Y_valid = auto_split_df(df, x_name, y_name, valid_fold, test_fold, stratified, seed)
     
+    load_video = build_load_video(im_size, max_frames)
+
     train_n_images = len(Y_train)
-    train_dataset = build_dataset_from_X_Y(X_train, Y_train, all_class, train_with_labels, label_mode, img_size,
+    train_dataset = build_dataset_from_X_Y(X_train, Y_train, load_video, all_class, train_with_labels, label_mode, img_size,
                                            BATCH_SIZE, train_repeat, train_shuffle, train_augment, im_size_before_crop)
 
     valid_n_images = len(Y_valid)
-    valid_dataset = build_dataset_from_X_Y(X_valid, Y_valid, all_class, valid_with_labels, label_mode, img_size,
+    valid_dataset = build_dataset_from_X_Y(X_valid, Y_valid, load_video, all_class, valid_with_labels, label_mode, img_size,
                                            BATCH_SIZE, valid_repeat, valid_shuffle, valid_augment)
 
     print(len(all_class))
+    print(all_class)
     print(len(X_train))
     print(len(X_valid))
     print(X_train[0])

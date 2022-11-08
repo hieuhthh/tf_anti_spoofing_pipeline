@@ -1,11 +1,20 @@
 route: ./
 seed: 42
-CUDA_VISIBLE_DEVICES: 0,1
+CUDA_VISIBLE_DEVICES: 
 
-im_size: 160
-im_size_before_crop: 180 # ~ for not using this
-label_mode: cate_int
+im_size: 256
+im_size_before_crop: ~ # ~ for not using this
+label_mode: cate
+max_frames: 128
 BATCH_SIZE: 128
+
+stratified: True
+
+x_name: fname
+y_name: liveness_score
+fold: 5
+valid_fold: 0
+test_fold: ~
 
 valid_ratio: 0.1
 test_ratio: ~
