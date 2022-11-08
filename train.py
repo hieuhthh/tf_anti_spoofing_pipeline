@@ -8,7 +8,6 @@ import tensorflow as tf
 from glob import glob
 
 from dataset import *
-from multiprocess_dataset import *
 from utils import *
 from model import *
 from losses import *
@@ -34,18 +33,21 @@ print('epochs:', epochs)
 seedEverything(seed)
 print('BATCH_SIZE:', BATCH_SIZE)
 
-route_dataset = path_join(route, 'dataset')
-print('route_dataset:', route_dataset)
+route_dataset = path_join(route, 'unzip', 'train', 'videos')
+df = pd.read_csv('./unzip/train/label.csv')
+df[x_name] = df[x_name].apply(lambda x : path_join(route_dataset, x))
 
-X_train, Y_train, all_class, X_valid, Y_valid = auto_split_data_multiprocessing_faster(route_dataset, valid_ratio, test_ratio, seed)
+X_train, Y_train, all_class, X_valid, Y_valid = auto_split_df(df, x_name, y_name, fold, valid_fold, test_fold, stratified, seed)
     
+load_video = build_load_video(im_size, max_frames)
+
 train_n_images = len(Y_train)
-train_dataset = build_dataset_from_X_Y(X_train, Y_train, all_class, train_with_labels, label_mode, img_size,
-                                       BATCH_SIZE, train_repeat, train_shuffle, train_augment, im_size_before_crop)
+train_dataset = build_dataset_from_X_Y(X_train, Y_train, load_video, all_class, train_with_labels, label_mode, img_size,
+                                        BATCH_SIZE, train_repeat, train_shuffle, train_augment, im_size_before_crop)
 
 valid_n_images = len(Y_valid)
-valid_dataset = build_dataset_from_X_Y(X_valid, Y_valid, all_class, valid_with_labels, label_mode, img_size,
-                                       BATCH_SIZE, valid_repeat, valid_shuffle, valid_augment)
+valid_dataset = build_dataset_from_X_Y(X_valid, Y_valid, load_video, all_class, valid_with_labels, label_mode, img_size,
+                                        BATCH_SIZE, valid_repeat, valid_shuffle, valid_augment)
 
 n_labels = len(all_class)
 
@@ -61,26 +63,43 @@ strategy = auto_select_accelerator()
 with strategy.scope():
     base = get_base_model(base_name, input_shape)
     emb_model = create_emb_model(base, final_dropout, have_emb_layer, emb_dim)
-    model = create_model(input_shape, emb_model, n_labels, use_normdense, use_cate_int)
-    model.summary()
+    model = create_model(max_frames, input_shape, emb_model, emb_dim, final_dropout, n_labels, 
+                         trans_layers, num_heads, mlp_dim,
+                         use_normdense, use_cate_int)
 
     losses = {
-        'cate_output' : ArcfaceLoss(from_logits=True, 
-                                    label_smoothing=arcface_label_smoothing,
-                                    margin1=arcface_margin1,
-                                    margin2=arcface_margin2,
-                                    margin3=arcface_margin3),
-        'embedding' : SupervisedContrastiveLoss(temperature=sup_con_temperature),
+        'cate_output' : tf.keras.losses.CategoricalCrossentropy(from_logits=False, 
+                                                                label_smoothing=arcface_label_smoothing,
+                                                                ),
     }
 
     loss_weights = {
-        'cate_output' : arc_face_weight,
-        'embedding' : sup_con_weight,
+        'cate_output' : 1.0,
     }
 
     metrics = {
-        'cate_output' : tf.keras.metrics.CategoricalAccuracy()
+        'cate_output' : tf.keras.metrics.CategoricalAccuracy(),
     }
+
+    # losses = {
+    #     'cate_output' : ArcfaceLoss(from_logits=True, 
+    #                                 label_smoothing=arcface_label_smoothing,
+    #                                 margin1=arcface_margin1,
+    #                                 margin2=arcface_margin2,
+    #                                 margin3=arcface_margin3),
+    #     'embedding' : SupervisedContrastiveLoss(temperature=sup_con_temperature),
+    # }
+
+    # loss_weights = {
+    #     'cate_output' : arc_face_weight,
+    #     'embedding' : sup_con_weight,
+    # }
+
+    # metrics = {
+    #     'cate_output' : tf.keras.metrics.CategoricalAccuracy()
+    # }
+
+    model.summary()
 
 model.compile(optimizer=Adam(learning_rate=1e-3),
               loss=losses,
@@ -105,21 +124,21 @@ his = model.fit(train_dataset,
                 verbose=1,
                 callbacks=callbacks)
 
-# metric = 'loss'
-# visual_save_metric(his, metric)
+metric = 'loss'
+visual_save_metric(his, metric)
 
-# metric = 'cate_output_categorical_accuracy:'
-# visual_save_metric(his, metric)
+metric = 'cate_output_categorical_accuracy:'
+visual_save_metric(his, metric)
 
-# # EVALUATE
+# EVALUATE
 
-# valid_eval = model.evaluate(valid_dataset)
+valid_eval = model.evaluate(valid_dataset)
 
-# print("valid_eval", valid_eval)
+print("valid_eval", valid_eval)
 
-# with open("valid_eval.txt", mode='w') as f:
-#     for item in valid_eval:
-#         f.write(str(item) + " ")
+with open("valid_eval.txt", mode='w') as f:
+    for item in valid_eval:
+        f.write(str(item) + " ")
 
 
 

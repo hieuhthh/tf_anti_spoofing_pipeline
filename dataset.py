@@ -29,7 +29,7 @@ def get_data_from_phrase(route, phrase=None):
         Y_int = Y_int + len(temp) * [all_class.index(cl)]
     return X_path, Y_int, all_class
 
-def auto_split_df(df, x_name='image', y_name='label', valid_fold=None, test_fold=None, stratified=False, seed=42):
+def auto_split_df(df, x_name='image', y_name='label', fold=5, valid_fold=None, test_fold=None, stratified=False, seed=42):
     df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     all_class = sorted(list(df[y_name].unique()))
 
@@ -91,7 +91,7 @@ def build_decoder(with_labels=True, label_mode='int', all_class=None, target_siz
         return img
 
     def decode_img(img):
-        # img = decode_img_preprocess(img)
+        img = decode_img_preprocess(img)
         return img
     
     def decode_label(label):
@@ -171,7 +171,7 @@ def build_dataset(paths, labels=None, load_video=None, bsize=32,
                                     ), num_parallel_calls=AUTO)
 
     dset = dset.map(decode_fn, num_parallel_calls=AUTO)
-    dset = dset.map(lambda x,y:(augment(x),y), num_parallel_calls=AUTO) if augment is not None else dset
+    # dset = dset.map(lambda x,y:(augment(x),y), num_parallel_calls=AUTO) if augment is not None else dset
     dset = dset.batch(bsize)
     dset = dset.prefetch(AUTO)
     
@@ -198,8 +198,8 @@ if __name__ == '__main__':
     settings = get_settings()
     globals().update(settings)
 
-    route_dataset = '/home/lap14880/hieunmt/antispoofing/tf_anti_spoofing/unzip/train/videos'
-    df = pd.read_csv('/home/lap14880/hieunmt/antispoofing/tf_anti_spoofing/unzip/train/label.csv')
+    route_dataset = path_join(route, 'unzip', 'train', 'videos')
+    df = pd.read_csv('./unzip/train/label.csv')
     df[x_name] = df[x_name].apply(lambda x : path_join(route_dataset, x))
 
     img_size = (im_size, im_size)
@@ -209,17 +209,17 @@ if __name__ == '__main__':
     if label_mode == 'cate_int':
         use_cate_int = True
 
-    X_train, Y_train, all_class, X_valid, Y_valid = auto_split_df(df, x_name, y_name, valid_fold, test_fold, stratified, seed)
+    X_train, Y_train, all_class, X_valid, Y_valid = auto_split_df(df, x_name, y_name, fold, valid_fold, test_fold, stratified, seed)
     
     load_video = build_load_video(im_size, max_frames)
 
     train_n_images = len(Y_train)
     train_dataset = build_dataset_from_X_Y(X_train, Y_train, load_video, all_class, train_with_labels, label_mode, img_size,
-                                           BATCH_SIZE, train_repeat, train_shuffle, train_augment, im_size_before_crop)
+                                            BATCH_SIZE, train_repeat, train_shuffle, train_augment, im_size_before_crop)
 
     valid_n_images = len(Y_valid)
     valid_dataset = build_dataset_from_X_Y(X_valid, Y_valid, load_video, all_class, valid_with_labels, label_mode, img_size,
-                                           BATCH_SIZE, valid_repeat, valid_shuffle, valid_augment)
+                                            BATCH_SIZE, valid_repeat, valid_shuffle, valid_augment)
 
     print(len(all_class))
     print(all_class)
@@ -230,10 +230,10 @@ if __name__ == '__main__':
 
     for x, y in train_dataset:
         break
-    print(x)
-    print(y)
+    print(x.shape)
+    print(y.shape)
 
     import cv2
     import numpy as np
-    cv2.imwrite("sample.png", np.array(x[0][...,::-1])*255)
+    cv2.imwrite("sample.png", np.array(x[0][0][...,::-1])*255)
 

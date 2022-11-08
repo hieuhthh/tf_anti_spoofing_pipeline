@@ -1,12 +1,12 @@
 route: ./
 seed: 42
-CUDA_VISIBLE_DEVICES: 
+CUDA_VISIBLE_DEVICES: "0,1"
 
 im_size: 256
 im_size_before_crop: ~ # ~ for not using this
 label_mode: cate
-max_frames: 128
-BATCH_SIZE: 128
+max_frames: 16
+BATCH_SIZE: 2
 
 stratified: True
 
@@ -29,11 +29,15 @@ valid_repeat: False
 valid_shuffle: False
 valid_augment: False
 
-base_name: 'EfficientNetV2S'
-final_dropout: 0.3
+base_name: 'EfficientNetV1B4'
+final_dropout: 0.1
 have_emb_layer: True
-emb_dim: 512
-use_normdense: True
+emb_dim: 256
+use_normdense: False
+
+trans_layers: 1
+num_heads: 2
+mlp_dim: 32
 
 pretrained: ~
 
@@ -51,6 +55,6 @@ mode: min
 
 max_lr: 1.0e-3
 min_lr: 1.0e-5
-cycle_epoch: 10
+cycle_epoch: 5
 n_cycle: 1
 save_weights_only: False
